@@ -67,7 +67,8 @@ class LangevinDynamics(SDE):
         The limiting distribution of LangevinDynamics is `p(x)`
 
         Args:
-            score (func): Inputs tensor of shape (batch_size, dim), outputs tensor of shape (batch_size, dim)
+            score (func): Inputs tensor of shape (batch_size, dim), outputs tensor of shape (batch_size, dim).
+                Can be `distribution.Density.score`.
             noise_scheduler: Inputs torch tensor (batch_size, 1), outputs tensor of shape (batch_size, dim)
         '''
         self.score = score

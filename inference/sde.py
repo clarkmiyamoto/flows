@@ -69,7 +69,7 @@ class LangevinDynamics(SDE):
         Args:
             score (func): Inputs tensor of shape (batch_size, dim), outputs tensor of shape (batch_size, dim).
                 Can be `distribution.Density.score`.
-            noise_scheduler: Inputs torch tensor (batch_size, 1), outputs tensor of shape (batch_size, dim)
+            noise_scheduler: Inputs torch tensor (batch_size, 1), outputs tensor of shape (batch_size, 1)
         '''
         self.score = score
         self.noise_scheduler = noise_scheduler

@@ -249,7 +249,7 @@ class CheckerboardSampleable(Sampleable):
             torch.Tensor: shape (num_samples, 3)
         """
         grid_length = 2 * self.scale / self.grid_size
-        samples = torch.zeros(0,2).to(device)
+        samples = torch.zeros(0,2).to(self.device)
         while samples.shape[0] < num_samples:
             # Sample num_samples
             new_samples = (torch.rand(num_samples,2).to(self.device) - 0.5) * 2 * self.scale

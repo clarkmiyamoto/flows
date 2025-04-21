@@ -78,7 +78,7 @@ class LangevinDynamics(SDE):
         _, dim = xt.shape
         noise = self.noise_scheduler(t).repeat(1, dim)
 
-        return noise * self.score(xt) / 2
+        return self.score(xt, t)
     
     def diffusion_coefficient(self, xt: torch.Tensor, t: torch.Tensor):
         _, dim = xt.shape

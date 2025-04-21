@@ -57,6 +57,42 @@ class Density(ABC):
         score = vmap(jacrev(self.log_density))(x)  # (batch_size, 1, 1, 1, ...)
         return score.squeeze((1, 2, 3))  # (batch_size, ...)
 
+class InterpolatedDensity(Density):
+    
+    def __init__(self, density0: Density, density1: Density):
+        """
+        Args:
+            density0: Density at t=0
+            density1: Density at t=1
+        """
+        self.density0 = density0
+        self.density1 = density1
+
+    def log_density(self, x: torch.Tensor, alpha: float) -> torch.Tensor:
+        log_density0 = self.density0.log_density(x)
+        log_density1 = self.density1.log_density(x)
+        return self.interpolate(log_density0, log_density1, alpha)
+
+    def score(self, x: torch.Tensor, alpha: float) -> torch.Tensor:
+        x = x.unsqueeze(1)  # (batch_size, 1, ...)
+        foo = lambda x: self.log_density(x, alpha)
+        score = vmap(jacrev(foo))(x)  # (batch_size, 1, 1, 1, ...)
+        return score.squeeze((1, 2, 3))  # (batch_size, ...)
+    
+    @abstractmethod
+    def interpolate(self, log_density0: torch.tensor, log_density1: torch.tensor, alpha) -> Density:
+        """Constructs interpolation between density0 and density1
+        
+        Args:
+        - log_density0 (torch.Tensor): Log density of density0 evaluated at x
+        - log_density1 (torch.Tensor): Log density of density1 evaluated at x
+        - alpha (float): Interpolation parameter (0 <= alpha <= 1)
+        """
+        pass
+    
+
+# Example densities
+
 class Gaussian(torch.nn.Module, Sampleable, Density):
     """
     Multivariate Gaussian distribution
@@ -152,6 +188,42 @@ class GaussianMixture(torch.nn.Module, Sampleable, Density):
         covs = torch.diag_embed(torch.ones(nmodes, 2) * std ** 2)
         weights = torch.ones(nmodes) / nmodes
         return cls(means, covs, weights)
+    
+class Rosenbrock(Density):
+    """
+    Rosenbrock distribution, a common test function for optimization algorithms.
+    
+    The log probability is of the form:
+    ```
+    \sum_{i=1}^{dim - 1}[a (x_{i+1} - x_i^2)^2 + (b - x_i)^2] / c
+    ```
+    """
+
+    def __init__(self, 
+                 a: float = 100.0,
+                 b: float = 20.0,
+                 c: float = 1.0,
+                 dim: int = 2,
+                 ):
+        super().__init__()
+        self.a = a
+        self.b = b
+        self.c = c
+        self._dim = dim
+        
+    @property
+    def dim(self) -> int:
+        return self._dim
+    
+    def log_density(self, x):
+        x_i = x[:, :-1]       # shape (batch_size, dim - 1)
+        x_next = x[:, 1:]     # shape (batch_size, dim - 1)
+        term1 = self.a * (x_next - x_i**2)**2
+        term2 = (self.c - x_i)**2
+        return -1 * ((term1 + term2).sum(dim=1)) / self.b
+
+
+# Example Sampleables
 
 class MoonsSampleable(Sampleable):
     """

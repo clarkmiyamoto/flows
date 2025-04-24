@@ -69,6 +69,15 @@ class InterpolatedDensity(Density):
         self.density1 = density1
 
     def log_density(self, x: torch.Tensor, alpha: float) -> torch.Tensor:
+        """
+        Returns the log density at x.
+
+        Args:
+            - x: shape (batch_size, dim)
+            - alpha: Interpolation parameter (0 <= alpha <= 1)
+        Returns:
+            - log_density: shape (batch_size, 1)
+        """
         log_density0 = self.density0.log_density(x)
         log_density1 = self.density1.log_density(x)
         return self.interpolate(log_density0, log_density1, alpha)
@@ -189,7 +198,7 @@ class GaussianMixture(torch.nn.Module, Sampleable, Density):
         weights = torch.ones(nmodes) / nmodes
         return cls(means, covs, weights)
     
-class Rosenbrock(Density):
+class Rosenbrock2D(Density):
     """
     Rosenbrock distribution, a common test function for optimization algorithms.
     
@@ -203,24 +212,44 @@ class Rosenbrock(Density):
                  a: float = 100.0,
                  b: float = 20.0,
                  c: float = 1.0,
-                 dim: int = 2,
                  ):
         super().__init__()
         self.a = a
         self.b = b
         self.c = c
-        self._dim = dim
+        dim = 2
+        if (dim % 2 != 0):
+            raise ValueError(f"Density requires even dim")
+        else:
+            self._dim = dim
         
     @property
     def dim(self) -> int:
         return self._dim
     
-    def log_density(self, x):
-        x_i = x[:, :-1]       # shape (batch_size, dim - 1)
-        x_next = x[:, 1:]     # shape (batch_size, dim - 1)
-        term1 = self.a * (x_next - x_i**2)**2
-        term2 = (self.c - x_i)**2
-        return -1 * ((term1 + term2).sum(dim=1)) / self.b
+    def log_density(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Returns the log density at x.
+        Args:
+            - x: shape (batch_size, dim=2)
+        Returns:
+            - log_density: shape (batch_size, 1)
+        """
+        if x.ndim != 2 or x.shape[1] != 2:
+            raise ValueError(f"Expected x of shape (N,2), got {tuple(x.shape)}")
+
+        # unpack
+        x0 = x[:, 0]
+        x1 = x[:, 1]
+
+        # Rosenbrock energy
+        func = (self.b - x1)**2 + self.a * (x1 - x0**2)**2
+
+        # unnormalized log-density
+        logp = -1 * func / self.c
+
+        # return as column vector
+        return logp.unsqueeze(1)
 
 
 # Example Sampleables

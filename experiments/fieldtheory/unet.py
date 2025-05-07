@@ -1,142 +1,210 @@
 import torch
-import torch.nn as nn
+from torch import nn
 
-class ConvBlock(nn.Module):
+class FourierEncoder(nn.Module):
     """
-    Two 3×3 convolutions + ReLU, preserving spatial dims (padding=1).
+    Based on https://github.com/lucidrains/denoising-diffusion-pytorch/blob/main/denoising_diffusion_pytorch/karras_unet.py#L183
     """
-    def __init__(self, in_ch, out_ch, num_dims):
+    def __init__(self, dim: int):
         super().__init__()
-        Conv = getattr(nn, f'Conv{num_dims}d')
-        self.conv1 = Conv(in_ch, out_ch, kernel_size=3, padding=1)
-        self.relu1 = nn.ReLU(inplace=True)
-        self.conv2 = Conv(out_ch, out_ch, kernel_size=3, padding=1)
-        self.relu2 = nn.ReLU(inplace=True)
+        assert dim % 2 == 0
+        self.half_dim = dim // 2
+        self.weights = nn.Parameter(torch.randn(1, self.half_dim))
 
-    def forward(self, x):
-        x = self.relu1(self.conv1(x))
-        x = self.relu2(self.conv2(x))
+    def forward(self, t: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - t: (bs, 1, 1, 1)
+        Returns:
+        - embeddings: (bs, dim)
+        """
+        t = t.view(-1, 1) # (bs, 1)
+        freqs = t * self.weights * 2 * math.pi # (bs, half_dim)
+        sin_embed = torch.sin(freqs) # (bs, half_dim)
+        cos_embed = torch.cos(freqs) # (bs, half_dim)
+        return torch.cat([sin_embed, cos_embed], dim=-1) * math.sqrt(2) # (bs, dim)
+
+class ResidualLayer(nn.Module):
+    def __init__(self, channels: int, time_embed_dim: int, y_embed_dim: int):
+        super().__init__()
+        self.block1 = nn.Sequential(
+            nn.SiLU(),
+            nn.BatchNorm2d(channels),
+            nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        )
+        self.block2 = nn.Sequential(
+            nn.SiLU(),
+            nn.BatchNorm2d(channels),
+            nn.Conv2d(channels, channels, kernel_size=3, padding=1)
+        )
+        # Converts (bs, time_embed_dim) -> (bs, channels)
+        self.time_adapter = nn.Sequential(
+            nn.Linear(time_embed_dim, time_embed_dim),
+            nn.SiLU(),
+            nn.Linear(time_embed_dim, channels)
+        )
+        # Converts (bs, y_embed_dim) -> (bs, channels)
+        self.y_adapter = nn.Sequential(
+            nn.Linear(time_embed_dim, time_embed_dim),
+            nn.SiLU(),
+            nn.Linear(time_embed_dim, channels)
+        )
+
+    def forward(self, x: torch.Tensor, t_embed: torch.Tensor, y_embed: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (bs, c, h, w)
+        - t_embed: (bs, t_embed_dim)
+        - y_embed: (bs, y_embed_dim)
+        """
+        res = x.clone() # (bs, c, h, w)
+
+        # Initial conv block
+        x = self.block1(x) # (bs, c, h, w)
+
+        # Add time embedding
+        t_embed = self.time_adapter(t_embed).unsqueeze(-1).unsqueeze(-1) # (bs, c, 1, 1)
+        x = x + t_embed
+
+        # Add y embedding (conditional embedding)
+        y_embed = self.y_adapter(y_embed).unsqueeze(-1).unsqueeze(-1) # (bs, c, 1, 1)
+        x = x + y_embed
+
+        # Second conv block
+        x = self.block2(x) # (bs, c, h, w)
+
+        # Add back residual
+        x = x + res # (bs, c, h, w)
+
         return x
 
-
-class DownBlock(nn.Module):
-    """
-    ConvBlock followed by 2× downsampling (MaxPool).
-    Returns (skip_feature, pooled_feature).
-    """
-    def __init__(self, in_ch, out_ch, num_dims):
+class Encoder(nn.Module):
+    def __init__(self, channels_in: int, channels_out: int, num_residual_layers: int, t_embed_dim: int, y_embed_dim: int):
         super().__init__()
-        self.conv = ConvBlock(in_ch, out_ch, num_dims)
-        Pool = getattr(nn, f'MaxPool{num_dims}d')
-        self.pool = Pool(kernel_size=2, stride=2)
+        self.res_blocks = nn.ModuleList([
+            ResidualLayer(channels_in, t_embed_dim, y_embed_dim) for _ in range(num_residual_layers)
+        ])
+        self.downsample = nn.Conv2d(channels_in, channels_out, kernel_size=3, stride=2, padding=1)
 
-    def forward(self, x):
-        skip = self.conv(x)
-        down = self.pool(skip)
-        return skip, down
+    def forward(self, x: torch.Tensor, t_embed: torch.Tensor, y_embed: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (bs, c_in, h, w)
+        - t_embed: (bs, t_embed_dim)
+        - y_embed: (bs, y_embed_dim)
+        """
+        # Pass through residual blocks: (bs, c_in, h, w) -> (bs, c_in, h, w)
+        for block in self.res_blocks:
+            x = block(x, t_embed, y_embed)
 
+        # Downsample: (bs, c_in, h, w) -> (bs, c_out, h // 2, w // 2)
+        x = self.downsample(x)
 
-class UpBlock(nn.Module):
-    """
-    2× upsampling (ConvTranspose) + ConvBlock.
-    If skip_ch>0, concatenate encoder skip before ConvBlock.
-    """
-    def __init__(self, in_ch, out_ch, skip_ch, num_dims):
+        return x
+
+class Midcoder(nn.Module):
+    def __init__(self, channels: int, num_residual_layers: int, t_embed_dim: int, y_embed_dim: int):
         super().__init__()
-        ConvTranspose = getattr(nn, f'ConvTranspose{num_dims}d')
-        self.upconv = ConvTranspose(in_ch, out_ch, kernel_size=2, stride=2)
-        self.conv = ConvBlock(out_ch + skip_ch, out_ch, num_dims)
+        self.res_blocks = nn.ModuleList([
+            ResidualLayer(channels, t_embed_dim, y_embed_dim) for _ in range(num_residual_layers)
+        ])
 
-    def forward(self, x, skip=None):
-        x = self.upconv(x)
-        if skip is not None:
-            # concatenate along channel axis
-            x = torch.cat([x, skip], dim=1)
-        return self.conv(x)
+    def forward(self, x: torch.Tensor, t_embed: torch.Tensor, y_embed: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (bs, c, h, w)
+        - t_embed: (bs, t_embed_dim)
+        - y_embed: (bs, y_embed_dim)
+        """
+        # Pass through residual blocks: (bs, c, h, w) -> (bs, c, h, w)
+        for block in self.res_blocks:
+            x = block(x, t_embed, y_embed)
 
+        return x
 
-class UNetND(nn.Module):
-    """
-    Generic N-dimensional U-Net:
-
-      - in_channels → encoder_channels[0] → … → encoder_channels[-1]
-      - optional bottleneck
-      - decoder_channels[0] → … → decoder_channels[-1] → out_channels
-
-    encoder_channels and decoder_channels can be of different lengths or values.
-    """
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        encoder_channels: list[int],
-        decoder_channels: list[int],
-        num_dims: int = 2,
-        use_skip: bool = True
-    ):
+class Decoder(nn.Module):
+    def __init__(self, channels_in: int, channels_out: int, num_residual_layers: int, t_embed_dim: int, y_embed_dim: int):
         super().__init__()
-        assert len(encoder_channels) == len(decoder_channels), \
-            "encoder_channels and decoder_channels must have same length"
+        self.upsample = nn.Sequential(nn.Upsample(scale_factor=2, mode='bilinear'), nn.Conv2d(channels_in, channels_out, kernel_size=3, padding=1))
+        self.res_blocks = nn.ModuleList([
+            ResidualLayer(channels_out, t_embed_dim, y_embed_dim) for _ in range(num_residual_layers)
+        ])
 
-        self.use_skip = use_skip
-        self.num_dims = num_dims
+    def forward(self, x: torch.Tensor, t_embed: torch.Tensor, y_embed: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (bs, c, h, w)
+        - t_embed: (bs, t_embed_dim)
+        - y_embed: (bs, y_embed_dim)
+        """
+        # Upsample: (bs, c_in, h, w) -> (bs, c_out, 2 * h, 2 * w)
+        x = self.upsample(x)
 
-        # --- Encoder ----------------------------
-        self.enc_blocks = nn.ModuleList()
-        prev_ch = in_channels
-        for ch in encoder_channels:
-            self.enc_blocks.append(DownBlock(prev_ch, ch, num_dims))
-            prev_ch = ch
+        # Pass through residual blocks: (bs, c_out, h, w) -> (bs, c_out, 2 * h, 2 * w)
+        for block in self.res_blocks:
+            x = block(x, t_embed, y_embed)
 
-        # --- Bottleneck (optional) --------------
-        # Here we just keep the same channel size
-        self.bottleneck = ConvBlock(prev_ch, prev_ch, num_dims)
+        return x
 
-        # --- Decoder ----------------------------
-        self.dec_blocks = nn.ModuleList()
-        for idx, ch in enumerate(decoder_channels):
-            skip_ch = encoder_channels[-(idx+1)] if use_skip else 0
-            self.dec_blocks.append(UpBlock(prev_ch, ch, skip_ch, num_dims))
-            prev_ch = ch
+class MNISTUNet(ConditionalVectorField):
+    def __init__(self, channels: List[int], num_residual_layers: int, t_embed_dim: int, y_embed_dim: int):
+        super().__init__()
+        # Initial convolution: (bs, 1, 32, 32) -> (bs, c_0, 32, 32)
+        self.init_conv = nn.Sequential(nn.Conv2d(1, channels[0], kernel_size=3, padding=1), nn.BatchNorm2d(channels[0]), nn.SiLU())
 
-        # --- Final 1×1 conv to map to out_channels
-        Conv = getattr(nn, f'Conv{num_dims}d')
-        self.final_conv = Conv(prev_ch, out_channels, kernel_size=1)
+        # Initialize time embedder
+        self.time_embedder = FourierEncoder(t_embed_dim)
 
-    def forward(self, x):
-        # Encoder: collect skips
-        skips = []
-        for down in self.enc_blocks:
-            skip, x = down(x)
-            if self.use_skip:
-                skips.append(skip)
+        # Initialize y embedder
+        self.y_embedder = nn.Embedding(num_embeddings = 11, embedding_dim = y_embed_dim)
 
-        # Bottleneck
-        x = self.bottleneck(x)
+        # Encoders, Midcoders, and Decoders
+        encoders = []
+        decoders = []
+        for (curr_c, next_c) in zip(channels[:-1], channels[1:]):
+            encoders.append(Encoder(curr_c, next_c, num_residual_layers, t_embed_dim, y_embed_dim))
+            decoders.append(Decoder(next_c, curr_c, num_residual_layers, t_embed_dim, y_embed_dim))
+        self.encoders = nn.ModuleList(encoders)
+        self.decoders = nn.ModuleList(reversed(decoders))
 
-        # Decoder: consume skips in reverse
-        for idx, up in enumerate(self.dec_blocks):
-            skip = skips[-(idx+1)] if self.use_skip else None
-            x = up(x, skip)
+        self.midcoder = Midcoder(channels[-1], num_residual_layers, t_embed_dim, y_embed_dim)
 
-        # Final output
-        return self.final_conv(x)
+        # Final convolution
+        self.final_conv = nn.Conv2d(channels[0], 1, kernel_size=3, padding=1)
 
-if __name__ == '__main__':
-    '''
-    Test the UNetND implementation
-    '''
-    dim = 1
-    encoder_channels = [2 ** i for i in range(4, 8)]
-    decoder_channels = list(reversed(encoder_channels))
-    model = UNetND(
-        in_channels=dim,
-        out_channels=dim,
-        encoder_channels=encoder_channels,
-        decoder_channels=decoder_channels,
-        num_dims=2,
-        use_skip=True
-    )
-    x = torch.rand(10, dim, encoder_channels[0], decoder_channels[-1])
-    print(x.shape)
-    print(model(x).shape)
+    def forward(self, x: torch.Tensor, t: torch.Tensor, y: torch.Tensor):
+        """
+        Args:
+        - x: (bs, 1, 32, 32)
+        - t: (bs, 1, 1, 1)
+        - y: (bs,)
+        Returns:
+        - u_t^theta(x|y): (bs, 1, 32, 32)
+        """
+        # Embed t and y
+        t_embed = self.time_embedder(t) # (bs, time_embed_dim)
+        y_embed = self.y_embedder(y) # (bs, y_embed_dim)
+
+        # Initial convolution
+        x = self.init_conv(x) # (bs, c_0, 32, 32)
+
+        residuals = []
+
+        # Encoders
+        for encoder in self.encoders:
+            x = encoder(x, t_embed, y_embed) # (bs, c_i, h, w) -> (bs, c_{i+1}, h // 2, w //2)
+            residuals.append(x.clone())
+
+        # Midcoder
+        x = self.midcoder(x, t_embed, y_embed)
+
+        # Decoders
+        for decoder in self.decoders:
+            res = residuals.pop() # (bs, c_i, h, w)
+            x = x + res
+            x = decoder(x, t_embed, y_embed) # (bs, c_i, h, w) -> (bs, c_{i-1}, 2 * h, 2 * w)
+
+        # Final convolution
+        x = self.final_conv(x) # (bs, 1, 32, 32)
+
+        return x

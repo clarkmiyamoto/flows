@@ -56,6 +56,9 @@ class Density(ABC):
         x = x.unsqueeze(1)  # (batch_size, 1, ...)
         score = vmap(jacrev(self.log_density))(x)  # (batch_size, 1, 1, 1, ...)
         return score.squeeze((1, 2, 3))  # (batch_size, ...)
+        # x = x.clone().detach().requires_grad_(True) 
+        # logp = self.log_density(x) # Shape (batch_size,)
+        # return torch.autograd.grad(logp.sum(), x)[0]  # shape (batch_size, dim)
 
 class InterpolatedDensity(Density):
     

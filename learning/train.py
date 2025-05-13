@@ -14,17 +14,22 @@ class Trainer(ABC):
     def get_train_loss(self, **kwargs) -> torch.Tensor:
         pass
 
-    def get_optimizer(self, lr: float):
-        return torch.optim.Adam(self.model.parameters(), lr=lr)
+    def get_optimizer(self, lr: float, setup_optimzer: dict):
+        return torch.optim.AdamW(self.model.parameters(), lr=lr, **setup_optimzer)
 
-    def train(self, num_epochs: int, device: torch.device, lr: float = 1e-3, **kwargs) -> torch.Tensor:
+    def train(self, 
+              num_epochs: int, 
+              device: torch.device, 
+              lr: float = 1e-3, 
+              setup_optimzer: dict = dict(),
+              **kwargs) -> torch.Tensor:
         if self.wandb_project is not None:
             # Log model architecture
             wandb.watch(self.model)
 
         # Start
         self.model.to(device)
-        opt = self.get_optimizer(lr)
+        opt = self.get_optimizer(lr, setup_optimzer=setup_optimzer)
         self.model.train()
 
         # Train loop

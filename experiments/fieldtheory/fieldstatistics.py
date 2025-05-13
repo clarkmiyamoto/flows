@@ -43,8 +43,8 @@ def exectations(cfgs1: torch.Tensor, cfgs2: torch.Tensor):
     print(tabulate(table, headers=headers, tablefmt="pretty"))
 
 def twoPointCorrelation(cfgs1: torch.Tensor, cfgs2: torch.Tensor):
-    corr_samples = get_corr_func(cfgs1)
-    corr_target = get_corr_func(cfgs2)
+    corr_samples = get_corr_func(cfgs1).cpu().detach().numpy()
+    corr_target = get_corr_func(cfgs2).cpu().detach().numpy()
 
     fig, ax = plt.subplots(1,1, figsize=(6,6))
     plt.xticks([i for i in range(1, 32, 4)])

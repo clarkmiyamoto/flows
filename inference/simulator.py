@@ -17,16 +17,22 @@ class Simulator(ABC):
         pass
 
     @torch.no_grad()
-    def simulate(self, x: torch.Tensor, ts: torch.Tensor):
+    def simulate(self, x: torch.Tensor, ts: torch.Tensor, use_tqdm: bool = False):
         """
         Simulates using the discretization gives by ts
         Args:
             - x_init: initial state at time ts[0], shape (batch_size, dim)
             - ts: timesteps, shape (nts,)
+            - use_tqdm: whether to show progress bar, defaults to False
         Returns:
             - x_final: final state at time ts[-1], shape (batch_size, dim)
         """
-        for t_idx in range(len(ts) - 1):
+        if use_tqdm:
+            iterator = tqdm(range(len(ts) - 1))
+        else:
+            iterator = range(len(ts) - 1)
+
+        for t_idx in iterator:
             t = ts[t_idx]
             h = ts[t_idx + 1] - ts[t_idx]
             x = self.step(x, t, h)

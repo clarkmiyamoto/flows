@@ -1,3 +1,8 @@
+from abc import ABC, abstractmethod
+import torch
+
+from .distribution import Sampleable
+
 class ConditionalProbabilityPath(torch.nn.Module, ABC):
     """
     Abstract base class for conditional probability paths
@@ -6,7 +11,7 @@ class ConditionalProbabilityPath(torch.nn.Module, ABC):
         super().__init__()
         self.p_simple = p_simple
         self.p_data = p_data
-
+        
     def sample_marginal_path(self, t: torch.Tensor) -> torch.Tensor:
         """
         Samples from the marginal distribution p_t(x) = p_t(x|z) p(z)
@@ -71,12 +76,9 @@ class ConditionalProbabilityPath(torch.nn.Module, ABC):
         """
         pass
 
-class GaussianConditionalProbabilityPath(ConditionalProbabilityPath):
-    def __init__(self, p_data: Sampleable, alpha: Alpha, beta: Beta):
-        p_simple = Gaussian.isotropic(p_data.dim, 1.0)
+class LinearConditionalProbabilityPath(ConditionalProbabilityPath):
+    def __init__(self, p_simple: Sampleable, p_data: Sampleable):
         super().__init__(p_simple, p_data)
-        self.alpha = alpha
-        self.beta = beta
 
     def sample_conditioning_variable(self, num_samples: int) -> torch.Tensor:
         """
@@ -84,50 +86,40 @@ class GaussianConditionalProbabilityPath(ConditionalProbabilityPath):
         Args:
             - num_samples: the number of samples
         Returns:
-            - z: samples from p(z), (num_samples, dim)
+            - z: samples from p(z), (num_samples, ...)
         """
         return self.p_data.sample(num_samples)
 
     def sample_conditional_path(self, z: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """
-        Samples from the conditional distribution p_t(x|z) = N(alpha_t * z, beta_t**2 * I_d)
+        Samples the random variable X_t = (1-t) X_0 + t z
         Args:
             - z: conditioning variable (num_samples, dim)
             - t: time (num_samples, 1)
         Returns:
             - x: samples from p_t(x|z), (num_samples, dim)
         """
-        return self.alpha(t) * z + self.beta(t) * torch.randn_like(z)
+        num_samples, _, _ = z.shape
+
+        x0 = self.p_simple.sample(num_samples)
+
+        return (1-t) * x0 + t * z
 
     def conditional_vector_field(self, x: torch.Tensor, z: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """
-        Evaluates the conditional vector field u_t(x|z)
+        Evaluates the conditional vector field u_t(x|z) = (z - x) / (1 - t)
         Note: Only defined on t in [0,1)
         Args:
-            - x: position variable (num_samples, dim)
-            - z: conditioning variable (num_samples, dim)
-            - t: time (num_samples, 1)
+            - x: position variable (num_samples, L, L)
+            - z: conditioning variable (num_samples, L, L)
+            - t: time (num_samples, 1, 1)
         Returns:
-            - conditional_vector_field: conditional vector field (num_samples, dim)
+            - conditional_vector_field: conditional vector field (num_samples, L, L)
         """
-        alpha_t = self.alpha(t) # (num_samples, 1)
-        beta_t = self.beta(t) # (num_samples, 1)
-        dt_alpha_t = self.alpha.dt(t) # (num_samples, 1)
-        dt_beta_t = self.beta.dt(t) # (num_samples, 1)
-
-        return (dt_alpha_t - dt_beta_t / beta_t * alpha_t) * z + dt_beta_t / beta_t * x
+        return (z - x) / (1 - t)
 
     def conditional_score(self, x: torch.Tensor, z: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """
-        Evaluates the conditional score of p_t(x|z) = N(alpha_t * z, beta_t**2 * I_d)
-        Note: Only defined on t in [0,1)
-        Args:
-            - x: position variable (num_samples, dim)
-            - z: conditioning variable (num_samples, dim)
-            - t: time (num_samples, 1)
-        Returns:
-            - conditional_score: conditional score (num_samples, dim)
+        Not known for Linear Conditional Probability Paths
         """
-        alpha_t = self.alpha(t)
-        beta_t = self.beta(t)
-        return (z * alpha_t - x) / beta_t ** 2
+        raise Exception("You should not be calling this function!")

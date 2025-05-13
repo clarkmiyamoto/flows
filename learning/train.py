@@ -5,31 +5,30 @@ from tqdm import tqdm
 import wandb
 
 class Trainer(ABC):
-    def __init__(self, model: torch.nn.Module, wandb_project = None):
+    def __init__(self, model: torch.nn.Module, wandb_record: bool = False):
         super().__init__()
         self.model = model
-        self.wandb_project = wandb_project
+        self.wandb_record = wandb_record
 
     @abstractmethod
     def get_train_loss(self, **kwargs) -> torch.Tensor:
         pass
 
-    def get_optimizer(self, lr: float, setup_optimizer: dict):
-        return torch.optim.AdamW(self.model.parameters(), lr=lr, **setup_optimizer)
+    def get_optimizer(self, setup_optimizer: dict):
+        return torch.optim.AdamW(self.model.parameters(),  **setup_optimizer)
 
     def train(self, 
               num_epochs: int, 
               device: torch.device, 
-              lr: float = 1e-3, 
               setup_optimizer: dict = dict(),
               setup_loss: dict = dict()) -> torch.Tensor:
-        if self.wandb_project is not None:
+        if self.wandb_record:
             # Log model architecture
             wandb.watch(self.model)
 
         # Start
         self.model.to(device)
-        opt = self.get_optimizer(lr, setup_optimizer=setup_optimizer)
+        opt = self.get_optimizer(setup_optimizer=setup_optimizer)
         self.model.train()
 
         # Train loop
@@ -41,9 +40,11 @@ class Trainer(ABC):
             opt.step()
             
             # Log metrics
-            metrics = {"train/loss": loss.item(), "epoch": idx}
-
-            if self.wandb_project is not None:
+            
+            if self.wandb_record and (idx % 10 == 0):
+                grad_norm = torch.norm(torch.stack([torch.norm(p.grad) for p in self.model.parameters() if p.grad is not None]))
+                
+                metrics = {"train/loss": loss.item(), "grad_norm": grad_norm, "epoch": idx}
                 wandb.log(metrics)
             
             pbar.set_description(f'Epoch {idx}, loss: {loss.item()}')

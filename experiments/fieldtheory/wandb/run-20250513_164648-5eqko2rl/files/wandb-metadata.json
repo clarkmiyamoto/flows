@@ -1,0 +1,44 @@
+{
+  "os": "macOS-15.4.1-arm64-arm-64bit-Mach-O",
+  "python": "CPython 3.13.2",
+  "startedAt": "2025-05-13T20:46:49.730575Z",
+  "program": "/Users/clarkmiyamoto/nyu/flows/experiments/fieldtheory/phi4_diffusion.ipynb",
+  "codePath": "experiments/fieldtheory/phi4_diffusion.ipynb",
+  "git": {
+    "remote": "https://github.com/clarkmiyamoto/flows",
+    "commit": "c367be2f34b39c69ab23f59694b34da68ec80454"
+  },
+  "email": "cm6627@nyu.edu",
+  "root": "/Users/clarkmiyamoto/nyu/flows/experiments/fieldtheory",
+  "host": "Clarks-MacBook-Air.local",
+  "executable": "/Users/clarkmiyamoto/miniconda3/envs/torch/bin/python",
+  "codePathLocal": "phi4_diffusion.ipynb",
+  "cpu_count": 8,
+  "cpu_count_logical": 8,
+  "disk": {
+    "/": {
+      "total": "432166404096",
+      "used": "398714908672"
+    },
+    "/System/Volumes/Data": {
+      "total": "432166404096",
+      "used": "398714908672"
+    }
+  },
+  "memory": {
+    "total": "8589934592"
+  },
+  "cpu": {
+    "count": 8,
+    "countLogical": 8
+  },
+  "apple": {
+    "name": "Apple M1",
+    "ecpuCores": 4,
+    "pcpuCores": 4,
+    "gpuCores": 8,
+    "memoryGb": 8,
+    "swapTotalBytes": "7516192768",
+    "ramTotalBytes": "8589934592"
+  }
+}

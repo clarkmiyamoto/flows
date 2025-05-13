@@ -33,7 +33,7 @@ class Trainer(ABC):
         self.model.train()
 
         # Train loop
-        pbar = tqdm(enumerate(range(num_epochs)))
+        pbar = tqdm(enumerate(range(num_epochs)), position=0, leave=True)
         for idx, epoch in pbar:
             opt.zero_grad()
             loss = self.get_train_loss(**setup_loss)

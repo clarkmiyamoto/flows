@@ -1,10 +1,9 @@
 from abc import ABC, abstractmethod
 
 import torch
-import torch.jit as jit
 from inference.distribution import Sampleable
 
-class FieldTheory(Sampleable, jit.ScriptModule, ABC):
+class FieldTheory(Sampleable, ABC):
     
     def __init__(self, 
                  spacetime_dim: int,
@@ -66,7 +65,6 @@ class FieldTheory(Sampleable, jit.ScriptModule, ABC):
         """
         pass
     
-    @jit.script_method
     def sample(self,
                phi_0: torch.Tensor, 
                n_steps: int = 100) -> torch.Tensor:
@@ -95,9 +93,9 @@ class FieldTheory(Sampleable, jit.ScriptModule, ABC):
             S_new, 
             accepted)
         """
-        dt = 1 / n_steps
-        k = 1
-        l = 1
+        dt = torch.tensor([1 / n_steps], device=self.device)
+        k = torch.tensor([1], device=self.device)
+        l = torch.tensor([1], device=self.device)
 
         phi = phi_0 # Initial field configuration
         chi = torch.randn_like(phi, device=self.device) # Momentum field (for HMC)

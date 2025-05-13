@@ -10,10 +10,10 @@ def compare_statistics(cfgs1: torch.Tensor, cfgs2: torch.Tensor):
     Args:
         cfgs (torch.Tensor): Configuration tensor of shape (n_samples, *lattice_shape)
     """
-    
+    # Compute magnetization and susceptibility
     exectations(cfgs1, cfgs2)
-
-    ###
+    # Compute two-point correlation
+    twoPointCorrelation(cfgs1, cfgs2)
 
 def exectations(cfgs1: torch.Tensor, cfgs2: torch.Tensor):
     ### Compute Magnetization and Susceptibility

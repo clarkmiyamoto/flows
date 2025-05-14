@@ -5,7 +5,7 @@ import math
 from abc import ABC, abstractmethod
 from typing import List
 
-class FourierEncoder(nn.Module):
+class FourierEncoder(jit.ScriptModule):
     """
     Based on https://github.com/lucidrains/denoising-diffusion-pytorch/blob/main/denoising_diffusion_pytorch/karras_unet.py#L183
     """
@@ -15,6 +15,7 @@ class FourierEncoder(nn.Module):
         self.half_dim = dim // 2
         self.weights = nn.Parameter(torch.randn(1, self.half_dim))
 
+    @jit.script_method
     def forward(self, t: torch.Tensor) -> torch.Tensor:
         """
         Args:
@@ -28,7 +29,7 @@ class FourierEncoder(nn.Module):
         cos_embed = torch.cos(freqs) # (bs, half_dim)
         return torch.cat([sin_embed, cos_embed], dim=-1) * math.sqrt(2) # (bs, dim)
 
-class ResidualLayer(nn.Module):
+class ResidualLayer(jit.ScriptModule):
     def __init__(self, 
                  channels: int, 
                  time_embed_dim: int, ):
@@ -49,7 +50,8 @@ class ResidualLayer(nn.Module):
             nn.SiLU(),
             nn.Linear(time_embed_dim, channels)
         )
-
+    
+    @jit.script_method
     def forward(self, 
                 x: torch.Tensor, 
                 t_embed: torch.Tensor, 
@@ -76,7 +78,7 @@ class ResidualLayer(nn.Module):
 
         return x
 
-class Encoder(nn.Module):
+class Encoder(jit.ScriptModule):
     def __init__(self, 
                  channels_in: int, 
                  channels_out: int, 
@@ -88,6 +90,7 @@ class Encoder(nn.Module):
         ])
         self.downsample = nn.Conv2d(channels_in, channels_out, kernel_size=3, stride=2, padding=1)
 
+    @jit.script_method
     def forward(self, 
                 x: torch.Tensor, 
                 t_embed: torch.Tensor, 
@@ -107,7 +110,7 @@ class Encoder(nn.Module):
 
         return x
 
-class Midcoder(nn.Module):
+class Midcoder(jit.ScriptModule):
     def __init__(self, 
                  channels: int, 
                  num_residual_layers: int, 
@@ -117,6 +120,7 @@ class Midcoder(nn.Module):
             ResidualLayer(channels, t_embed_dim) for _ in range(num_residual_layers)
         ])
 
+    @jit.script_method
     def forward(self, 
                 x: torch.Tensor, 
                 t_embed: torch.Tensor) -> torch.Tensor:
@@ -131,7 +135,7 @@ class Midcoder(nn.Module):
 
         return x
 
-class Decoder(nn.Module):
+class Decoder(jit.ScriptModule):
     def __init__(self, 
                  channels_in: int, 
                  channels_out: int, 
@@ -143,6 +147,7 @@ class Decoder(nn.Module):
             ResidualLayer(channels_out, t_embed_dim) for _ in range(num_residual_layers)
         ])
 
+    @jit.script_method
     def forward(self, 
                 x: torch.Tensor, 
                 t_embed: torch.Tensor) -> torch.Tensor:
@@ -160,7 +165,7 @@ class Decoder(nn.Module):
 
         return x
 
-class UNet(nn.Module):
+class UNet(jit.ScriptModule):
     def __init__(self, 
                  channels: List[int],
                  num_residual_layers: int, 
@@ -187,6 +192,7 @@ class UNet(nn.Module):
         # Final convolution
         self.final_conv = nn.Conv2d(channels[0], 1, kernel_size=3, padding=1)
 
+    @jit.script_method
     def forward(self, 
                 x: torch.Tensor, 
                 t: torch.Tensor):

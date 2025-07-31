@@ -1,60 +1,56 @@
 import torch
+from inference.path import ConditionalProbabilityPath
+from learning.mlp import MLPVectorField
 
 from abc import ABC, abstractmethod
 from tqdm import tqdm
 import wandb
 
 class Trainer(ABC):
-    def __init__(self, model: torch.nn.Module, wandb_record: bool = False):
+    def __init__(self, model: torch.nn.Module, device: torch.device):
         super().__init__()
-        self.model = model
-        self.wandb_record = wandb_record
+        self.model = model.to(device)
+        self.device = device
+
 
     @abstractmethod
     def get_train_loss(self, **kwargs) -> torch.Tensor:
         pass
 
-    def get_optimizer(self, setup_optimizer: dict):
-        return torch.optim.AdamW(self.model.parameters(),  **setup_optimizer)
+    def get_optimizer(self, lr: float):
+        return torch.optim.Adam(self.model.parameters(), lr=lr)
 
-    def train(self, 
-              num_epochs: int, 
-              device: torch.device, 
-              setup_optimizer: dict = dict(),
-              setup_loss: dict = dict()) -> torch.Tensor:
-        if self.wandb_record:
-            # Log model architecture
-            wandb.watch(self.model)
-
+    def train(self, num_epochs: int, lr: float = 1e-3, **kwargs) -> torch.Tensor:
         # Start
-        self.model.to(device)
-        opt = self.get_optimizer(setup_optimizer=setup_optimizer)
+        self.model.to(self.device)
+        opt = self.get_optimizer(lr)
         self.model.train()
 
         # Train loop
-        pbar = tqdm(enumerate(range(num_epochs)), position=0, leave=True)
-        for idx, epoch in pbar:
+        pbar = tqdm(range(num_epochs), mininterval=0.5)
+        for epoch in pbar:
             opt.zero_grad()
-            loss = self.get_train_loss(**setup_loss)
+            loss = self.get_train_loss(**kwargs)
             loss.backward()
             opt.step()
-            
-            # Log metrics
-            
-            if self.wandb_record and (idx % 10 == 0):
-                grad_norm = torch.norm(torch.stack([torch.norm(p.grad) for p in self.model.parameters() if p.grad is not None]))
-                
-                metrics = {"train/loss": loss.item(), "grad_norm": grad_norm, "epoch": idx}
-                wandb.log(metrics)
-            
-            pbar.set_description(f'Epoch {idx}, loss: {loss.item()}')
+
+            if epoch % 50 == 0:
+                pbar.set_description(f"Training: Epoch {epoch}, loss: {loss:.4f}")
 
         # Finish
         self.model.eval()
-        
-        # Close wandb run
-        if self.wandb_project is not None:
-            wandb.finish()
-    
-    def _init_wandb(self, **kwargs):
-        return wandb.init(project=self.wandb_project, config={})
+
+class ConditionalFlowMatchingTrainer(Trainer):
+    def __init__(self, path: ConditionalProbabilityPath, model: MLPVectorField, device: torch.device, **kwargs):
+        super().__init__(model, device, **kwargs)
+        self.path = path
+
+    def get_train_loss(self, batch_size: int) -> torch.Tensor:
+        z = self.path.p_data.sample(batch_size).to(self.device)
+        t = torch.rand(batch_size, 1).to(self.device)
+        x = self.path.sample_conditional_path(z,t).to(self.device)
+
+        u_model = self.model(x,t)
+        u_ref = self.path.conditional_vector_field(x,z,t)
+
+        return torch.norm(u_model - u_ref) / batch_size

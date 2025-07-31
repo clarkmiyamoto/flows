@@ -21,7 +21,7 @@ class Sampleable(ABC):
         pass
         
     @abstractmethod
-    def sample(self, num_samples: int) -> torch.Tensor:
+    def sample(self, num_samples: int, device: torch.device) -> torch.Tensor:
         """
         Args:
             - num_samples: the desired number of samples

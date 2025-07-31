@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 import torch
-from .simulator import Simulator
+from .path import ConditionalProbabilityPath
 
 class SDE(ABC):
     @abstractmethod
@@ -27,12 +27,6 @@ class SDE(ABC):
         """
         pass
 
-class EulerMaruyamaSimulator(Simulator):
-    def __init__(self, sde: SDE):
-        self.sde = sde
-        
-    def step(self, xt: torch.Tensor, t: torch.Tensor, h: torch.Tensor):
-        return xt + self.sde.drift_coefficient(xt,t) * h + self.sde.diffusion_coefficient(xt,t) * torch.sqrt(h) * torch.randn_like(xt)
 
 # Example SDEs
 
@@ -85,3 +79,75 @@ class LangevinDynamics(SDE):
         noise = self.noise_scheduler(t).repeat(1, dim)
 
         return noise
+
+class LangevinFlowSDE(SDE):
+    def __init__(self, flow_model: torch.nn.Module, score_model: torch.nn.Module, sigma: float):
+        """
+        Args:
+        - path: the ConditionalProbabilityPath object to which this vector field corresponds
+        - z: the conditioning variable, (1, dim)
+        """
+        super().__init__()
+        self.flow_model = flow_model
+        self.score_model = score_model
+        self.sigma = sigma
+
+    def drift_coefficient(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            - x: state at time t, shape (bs, dim)
+            - t: time, shape (bs,.)
+        Returns:
+            - u_t(x|z): shape (batch_size, dim)
+        """
+        return self.flow_model(x,t) + 0.5 * self.sigma ** 2 * self.score_model(x, t)
+
+    def diffusion_coefficient(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            - x: state at time t, shape (bs, dim)
+            - t: time, shape (bs,.)
+        Returns:
+            - u_t(x|z): shape (batch_size, dim)
+        """
+        return self.sigma * torch.randn_like(x)
+
+class ConditionalVectorFieldSDE(SDE):
+    def __init__(self, path: ConditionalProbabilityPath, z: torch.Tensor, sigma: float):
+        """
+        Args:
+        - path: the ConditionalProbabilityPath object to which this vector field corresponds
+        - z: the conditioning variable, (1, ...)
+        """
+        super().__init__()
+        self.path = path
+        self.z = z
+        self.sigma = sigma
+
+    def drift_coefficient(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        """
+        Returns the conditional vector field u_t(x|z)
+        Args:
+            - x: state at time t, shape (bs, dim)
+            - t: time, shape (bs,.) or (1,)
+        Returns:
+            - u_t(x|z): shape (batch_size, dim)
+        """
+        bs = x.shape[0]
+        z = self.z.expand(bs, *self.z.shape[1:])
+        # Ensure t has the right shape for broadcasting
+        if t.dim() == 0:
+            t = t.unsqueeze(0)
+        if t.shape[0] == 1:
+            t = t.expand(bs, *t.shape[1:])
+        return self.path.conditional_vector_field(x,z,t) + 0.5 * self.sigma**2 * self.path.conditional_score(x,z,t)
+
+    def diffusion_coefficient(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            - x: state at time t, shape (bs, dim)
+            - t: time, shape (bs,.)
+        Returns:
+            - u_t(x|z): shape (batch_size, dim)
+        """
+        return self.sigma * torch.randn_like(x)

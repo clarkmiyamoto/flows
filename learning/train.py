@@ -27,14 +27,14 @@ class Trainer(ABC):
         self.model.train()
 
         # Train loop
-        pbar = tqdm(range(num_epochs), mininterval=0.5)
+        pbar = tqdm(range(num_epochs))
         for epoch in pbar:
             opt.zero_grad()
             loss = self.get_train_loss(**kwargs)
             loss.backward()
             opt.step()
 
-            if epoch % 50 == 0:
+            if epoch % 2 == 0:
                 pbar.set_description(f"Training: Epoch {epoch}, loss: {loss:.4f}")
 
         # Finish

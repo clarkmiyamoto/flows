@@ -62,8 +62,12 @@ class Simulator(ABC):
     @torch.no_grad()
     def simulate_with_trajectory(self, x: torch.Tensor, ts: torch.Tensor):
         """
-        x  : (batch, dim)
-        ts : (T,), (batch, T) or (batch, T, 1)
+        Args:
+            x  : (batch, dim)
+            ts : (T,), (batch, T) or (batch, T, 1)
+        
+        Returns:
+            xs: Shape (batch_size, num_timesteps, dim)
         """
         bs, dim = x.shape
         ts = self._canon_ts(ts, bs)       # → (bs, T)
